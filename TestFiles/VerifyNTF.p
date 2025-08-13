@@ -1,8 +1,9 @@
 %------------------------------------------------------------------------------
 tff(simple_spec,logic,
     $alethic_modal == [
-      $constants == $rigid,
-      $quantification == $constant,
+      $domains == $constant,
+      $designation == $rigid,
+      $terms == $local,
       $modalities == $modal_system_M ] ).
 
 tff(fruit_type,type,   fruit: $tType).

@@ -38,17 +38,44 @@ rm -f $VerificationFile
 touch $VerificationFile
 cat $VampireTypesFile >> $VerificationFile
 echo "" >> $VerificationFile
-sed -e "s/, *interpretation *,/,axiom,/" $ModelFile >> $VerificationFile
+$TPTP4X -x -c -u machine -f tptp:short $ModelFile | sed -e "s/,interpretation,/,axiom,/" >> $VerificationFile
+# echo "---- Check this is SAT ---"
+# cat $VerificationFile
+# echo "--------------------------"
 $TryToProve -q1 -n1 -t $CPULimit -p "0" -m $ModalModelFinder $VerificationFile | grep "SZS" | \
 sed -e "s/ for .*//" > $VerificationProofFile
+# echo "---- $ModalModelFinder says ----"
+# cat $VerificationProofFile
+# echo "--------------------------"
 if (`grep -c "SZS status Satisfiable" $VerificationProofFile`) then
     echo "% Interpretation is satisfiable"
 else
     echo "% Interpretation not shown to be satisfiable"
 endif
 
+echo "% Checking the problem and interpretation is not unsatisfiable using $ModalModelVerifier"
+rm -f $VerificationProofFile
+rm -f $VerificationFile
+touch $VerificationFile
+$TPTP4X -x -c -u machine -f tptp:short $ProblemFile | sed -e "s/,conjecture,\(.*\))\./,negated_conjecture,~(\1))./" >> $VerificationFile
+cat $ModelFile >> $VerificationFile
+# echo "---- Check this is not UNS ---"
+# cat $VerificationFile
+# echo "------------------------------"
+#----Run Leo-III - it should not find UNS
+$TryToProve -q1 -n1 -t $CPULimit -p "0" -m $ModalModelVerifier $VerificationFile | grep "SZS" | \
+sed -e "s/ for .*//" > $VerificationProofFile
+# echo "---- $ModalModelVerifier says ----"
+# cat $VerificationProofFile
+# echo "--------------------------"
+if (`grep -c "SZS status Unsatisfiable" $VerificationProofFile`) then
+    echo "% Problem and interpretation is Unsatisfiable"
+else
+    echo "% Problem and interpretation not shown to be unsatisfiable"
+endif
+
 echo "% Building the verification problem"
-set VerificationFile = "$TempDir/AGMMVVerificationFile_$$"
+rm -f $VerificationProofFile
 rm -f $VerificationFile
 touch $VerificationFile
 
@@ -101,17 +128,16 @@ echo "% Extracted the conjecture"
 
 echo "% Running the modal model verifier $ModalModelVerifier"
 #DEBUG echo -n "% ";date '+%T %N'
-rm -f $VerificationProofFile
 $SystemOnTPTP -q1 $ModalModelVerifier $CPULimit $VerificationFile > $VerificationProofFile
 #DEBUG echo "% Ran $ModalModelVerifier"
 #DEBUG echo -n "% ";date '+%T %N'
-#DEBUG echo "---------- OUTPUT -----------"
+#DEBUG echo "--- $ModalModelVerifier says ---"
 #DEBUG cat $VerificationProofFile
 #DEBUG echo "-----------------------------"
 if (`grep -c 'SZS status Theorem' $VerificationProofFile`) then
-    echo -n "% SZS status Success"
+    echo -n "% SZS status Verified"
 else 
-    echo -n "% SZS status NoSuccess"
+    echo -n "% SZS status NotVerified"
 endif
 if (`expr match "$VerificationFile" "^$TempDir"` == 0) then
     echo " for problem $ProblemFile and $ModelFile"

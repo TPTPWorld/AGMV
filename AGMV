@@ -23,17 +23,17 @@ else
         set ModelFile = "$TempDir/AGMVModelFile_$$"
         $TPTP4X -t uniquenames4 -u machine $2 | grep -E '^ *..f\([^,]*, *(type|axiom|hypothesis|definition|conjecture) *,' > $ProblemFile
         $TPTP4X -t uniquenames4 -u machine $2 | grep -E '^ *..f\([^,]*, *(type|interpretation|fi_[a-z]*) *,' > $ModelFile
+    endif
 #DEBUG echo "---- Problem file ----"
 #DEBUG cat $ProblemFile
 #DEBUG echo "---- Interpretation file ----"
 #DEBUG cat $ModelFile
 #DEBUG echo "----------------- ----"
 #DEBUG goto cleanup
-    endif
 endif
 
 #----Check if classical or modal
-if (`grep -c '$ki_world' $ModelFile`) then
+if (`grep -c '$world' $ModelFile`) then
     echo "% This is a Kripke model, using modal verification"
     $AGMMV $CPULimit $ProblemFile $ModelFile
 else

@@ -19,7 +19,10 @@ my $TryToProve = "$TPTPDirectory/ServiceTools/TryToProve";
 
 #----Global for use in END statements
 my $GlobalTemporaryDirectory = "/tmp/GCMV_$$";
-my $ModelAsAxiomFile;   #----Set below
+my $TypesFile;   #----Set below
+my $ModelAsAxiomsFile;   #----Set below
+my $ProblemAsAxiomsFile;   #----Set below
+my $ProblemAndModelAsAxiomsFile;   #----Set below
 my $GlobalInterrupted = 0;
 my %GlobalOptions;
 
@@ -78,7 +81,10 @@ sub DoMain {
         $GlobalTemporaryDirectory = $GlobalOptions{'-k'};
     } 
     system("mkdir -p $GlobalTemporaryDirectory");
-    $ModelAsAxiomFile = "$GlobalTemporaryDirectory/ModelAsAxiom.ax";
+    $TypesFile = "$GlobalTemporaryDirectory/TypesFile.ax";
+    $ModelAsAxiomsFile = "$GlobalTemporaryDirectory/ModelAsAxiom.ax";
+    $ProblemAsAxiomsFile = "$GlobalTemporaryDirectory/ProblemAsAxioms.ax";
+    $ProblemAndModelAsAxiomsFile = "$GlobalTemporaryDirectory/ProblemAndModelAsAxiomsFile.ax";
     END {
         if (!defined($GlobalOptions{'-k'})) {
             system("rm -rf $GlobalTemporaryDirectory");
@@ -92,22 +98,34 @@ sub DoMain {
     }
 
 #----Convert the interpretation formula in model file to axiom. First save the type declarations
-    system("$TPTP4X -x -c -u machine $ModelFile | grep ',type,' > $ModelAsAxiomFile");
-#----Second convert all formulae to axioms. Note this does satuartions too, which was not part of
+    system("$TPTP4X -x -c -u machine $ModelFile | grep ',type,' > $TypesFile");
+#----Second convert all model formulae to axioms. This does saturations too, which was not part of
 #----the original plan. Check emails with Joe.
-    system("$TPTP4X -x -c -u machine $ModelFile | grep -v ',type,' | sed -e 's/^tcf/tff/' -e 's/^\\(...([^,]*,\\)[a-z]*\\(,.*\\)/\\1axiom\\2/' >> $ModelAsAxiomFile");
     QuietPrint("% Testing model status",1);
-    ($Result) = TryToProve($ModelAsAxiomFile,undef,
+    system("cp $TypesFile $ModelAsAxiomsFile");
+    system("$TPTP4X -x -c -u machine -f tptp:short $ModelFile | grep -v ',type,' | sed -e 's/^tcf/tff/' -e 's/^\\([^,]*\\),[^,]*,\\(.*\\)/\\1,axiom,\\2/' >> $ModelAsAxiomsFile");
+    ($Result) = TryToProve($ModelAsAxiomsFile,undef,
 # 'fof(prove_false,conjecture,$false).',
 "0",$GlobalOptions{'-m'},$GlobalOptions{'-t'});
     QuietPrint("% Model is $Result",1);
+#----Check that the model is consistent with the problem formulae. Convert problem formulae to
+#----axiom, with conjecture negated. They are individually made into conjectures for verification
+#----in TryToProve.
+    if (($Result eq "Unknown" && $GlobalOptions{'-f'}) || $Result eq "Satisfiable") {
+        QuietPrint("% Testing problem with model status",0);
+        system("$TPTP4X -x -c -u machine -f tptp:short $ProblemFile | grep -v ',type,' | sed -e '/,conjecture,/s/^\\([^,]*\\),[^,]*,\\(.*\\))\./\\1,negated_conjecture,~(\\2))./' -e 's/^\\([^,]*\\),[^,]*,\\(.*\\)/\\1,axiom,\\2/' > $ProblemAsAxiomsFile");
+        system("cat $TypesFile $ProblemAsAxiomsFile $ModelAsAxiomsFile > $ProblemAndModelAsAxiomsFile");
+        ($Result) = TryToProve($ProblemAndModelAsAxiomsFile,undef,"0",$GlobalOptions{'-m'},
+$GlobalOptions{'-t'});
+        QuietPrint("% Problem with model is $Result",1);
+    }
     if (($Result eq "Unknown" && $GlobalOptions{'-f'}) || $Result eq "Satisfiable") {
         $NumberOfProblemFormulaeToVerify = `grep -c -E '^(cnf|fof|tff|thf)' $ProblemFile` -
 `grep -c ', *type *,' $ProblemFile`;
         chomp($NumberOfProblemFormulaeToVerify);
         $CPULimitPerProblemFormula = int($GlobalOptions{'-t'} * 2 /
 $NumberOfProblemFormulaeToVerify);
-        ($Result) = VerifyModel($ModelAsAxiomFile,$ProblemFile,$GlobalOptions{'-p'},
+        ($Result) = VerifyModel($ModelAsAxiomsFile,$ProblemAsAxiomsFile,$GlobalOptions{'-p'},
 $GlobalOptions{'-m'},$CPULimitPerProblemFormula);
     }
     print("% SZS status $Result for $ModelFile models $ProblemFile\n");
@@ -132,33 +150,30 @@ sub QUITHandler {
 }
 #--------------------------------------------------------------------------------------------------
 sub VerifyModel {
-    my ($ModelAsAxiomFile,$ProblemFile,$Prover,$ModelFinder,$CPULimit) = @_;
+    my ($ModelAsAxiomsFile,$ProblemFile,$Prover,$ModelFinder,$CPULimit) = @_;
 
     my $ProblemFormula;
     my $ProblemFormulaName;
     my $Result;
     my $AllResult;
 
+#----Don't verify type formulae
     open(PROBLEM,"$TPTP4X -x -c -u machine $ProblemFile | grep -v ', *type *,' |") || 
 die("ERROR, Cannot open $ProblemFile\n");
 #----For each line (formula) in the problem
-#----If failure, continue only if requested
-    $AllResult = "Success";
+    $AllResult = "Verified";
     while (!$GlobalInterrupted && defined($ProblemFormula = <PROBLEM>)) {
         chomp($ProblemFormula);
-#----Negate the conjecture (it's a countermodel)
-        if ($ProblemFormula =~ /,conjecture,/) {
-            $ProblemFormula =~ s/^([^,]*,[^,]*,)(.*)\)\. */$1 ~($2))./;
-        }
         ($ProblemFormulaName) = ($ProblemFormula =~ /^...\(([^,]*),/);
         QuietPrint("% Verifying $ProblemFormulaName",1);
-        ($Result) = TryToProve("$ModelAsAxiomFile",$ProblemFormula,$Prover,$ModelFinder,$CPULimit);
+        ($Result) = TryToProve("$ModelAsAxiomsFile",$ProblemFormula,$Prover,$ModelFinder,$CPULimit);
         QuietPrint("% Proving result for $ProblemFormulaName is $Result",0);
         if ($Result eq "Theorem") {
             QuietPrint("% Verified $ProblemFormulaName",1);
         } else {
             QuietPrint("% Not verified $ProblemFormulaName",1);
-            $AllResult = "Unknown";
+            $AllResult = "NotVerified";
+#----If failure, continue only if requested
             if (! $GlobalOptions{'-f'}) {
                 close(PROBLEM);
                 return($AllResult);
